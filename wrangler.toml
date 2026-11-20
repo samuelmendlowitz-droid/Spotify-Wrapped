@@ -1,0 +1,13 @@
+name = "wrapped-challenge"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wrapped-challenge"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
