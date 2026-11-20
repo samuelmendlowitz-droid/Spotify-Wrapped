@@ -22,7 +22,7 @@ const game=await env.DB.prepare('SELECT phase FROM game WHERE id=1').first();if(
 const method=request.method,route=url.pathname;
 if(route==='/api/state'&&method==='GET'){
 const rows=(await env.DB.prepare('SELECT id,name,predictions,actual FROM players ORDER BY name COLLATE NOCASE').all()).results;
-const players=rows.map(p=>{let predictions=JSON.parse(p.predictions),actual=JSON.parse(p.actual);let hasResults=Object.values(actual).some(a=>a.some(Boolean));return {id:p.id,name:p.name,predictions:game.phase==='predictions'?null:predictions,actual:game.phase==='predictions'||!hasResults?null:actual,hasResults,score:game.phase==='predictions'||!hasResults?null:score(predictions,actual),filled:Object.fromEntries(Object.keys(CATS).map(k=>[k,predictions[k].filter(Boolean).length]))};});return json({phase:game.phase,players});}
+const players=rows.map(p=>{let predictions=JSON.parse(p.predictions),actual=JSON.parse(p.actual);let hasResults=Object.values(actual).some(a=>a.some(Boolean));return {id:p.id,name:p.name,predictions,actual:game.phase==='predictions'||!hasResults?null:actual,hasResults,score:game.phase==='predictions'||!hasResults?null:score(predictions,actual),filled:Object.fromEntries(Object.keys(CATS).map(k=>[k,predictions[k].filter(Boolean).length]))};});return json({phase:game.phase,players});}
 if(route==='/api/player'&&method==='POST'){
 if(game.phase!=='predictions')return json({error:'New players cannot join after predictions lock'},403);
 const body=await request.json(),name=String(body.name||'').trim().replace(/\s+/g,' ').slice(0,60);if(name.length<2)return json({error:'Enter a name with at least 2 characters'},400);
