@@ -5,7 +5,7 @@ compatibility_date = "2026-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "wrapped-challenge"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "3da13dc3-180c-4bbd-82ea-f82e4b3a5588"
 
 [[rules]]
 type = "Text"
