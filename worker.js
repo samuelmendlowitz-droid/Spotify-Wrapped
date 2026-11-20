@@ -1,8 +1,15 @@
 // Cloudflare Worker: serves the single-page app and a shared D1-backed API.
 import html from './index.html';
 const CATS={artists:5,songs:30,genres:5};
-const RANK={artists:[150,125,100,75,50],genres:[45,37.5,30,22.5,15],songs:Array.from({length:30},(_,i)=>(30-i)*350/465)};
-const multiplier=d=>d===0?1:d===1?.8:d===2?.65:d===3?.5:d===4?.4:d<=6?.3:d<=9?.2:d<=14?.1:.05;
+// Accuracy is the primary factor; actual rank adds at most a 20% bonus.
+// Normalize the rank bonuses so perfect predictions total 1,000 points.
+const BUDGET={artists:500,songs:350,genres:150};
+const RANK=Object.fromEntries(Object.entries(CATS).map(([cat,count])=>{
+ const bonuses=Array.from({length:count},(_,i)=>count===1?1.2:1.2-.2*i/(count-1));
+ const sum=bonuses.reduce((a,b)=>a+b,0);
+ return [cat,bonuses.map(b=>BUDGET[cat]*b/sum)];
+}));
+const multiplier=d=>d===0?1:d===1?.8:d===2?.6:d===3?.45:d===4?.3:d<=6?.2:d<=9?.1:.05;
 const norm=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/[\u2010-\u2015]/g,'-').replace(/[^\p{L}\p{N}]+/gu,' ').trim().replace(/\s+/g,' ');
 const round=n=>Math.round((n+Number.EPSILON)*10)/10;
 function cleanLists(raw){let out={};for(const [cat,len] of Object.entries(CATS)){if(!Array.isArray(raw?.[cat])||raw[cat].length>len)throw Error(`Invalid ${cat} list`);out[cat]=Array.from({length:len},(_,i)=>String(raw[cat][i]||'').trim().slice(0,160));let nonempty=out[cat].filter(Boolean).map(norm);if(new Set(nonempty).size!==nonempty.length)throw Error(`Duplicate ${cat} entries`);}return out;}
@@ -10,10 +17,10 @@ function cleanLists(raw){let out={};for(const [cat,len] of Object.entries(CATS))
 const title=s=>norm(String(s||'').split(/\s+[—–-]\s+|\s+by\s+/i)[0]);
 function editDistance(a,b){const prev=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){let diag=prev[0];prev[0]=i;for(let j=1;j<=b.length;j++){const old=prev[j];prev[j]=Math.min(prev[j]+1,prev[j-1]+1,diag+(a[i-1]===b[j-1]?0:1));diag=old;}}return prev[b.length];}
 function matchQuality(a,b,cat){const x=cat==='songs'?title(a):norm(a),y=cat==='songs'?title(b):norm(b);if(!x||!y)return 0;if(x===y)return 1;const longer=Math.max(x.length,y.length),dist=editDistance(x,y);if(longer>=6&&dist<=Math.min(2,Math.floor(longer*.18)))return .8;return 0;}
-function score(pred,actual){let total=0,category={},details={};for(const cat of Object.keys(CATS)){let pts=0;const candidates=[];for(let i=0;i<pred[cat].length;i++)if(pred[cat][i])for(let j=0;j<actual[cat].length;j++)if(actual[cat][j]){const quality=matchQuality(pred[cat][i],actual[cat][j],cat);if(quality)candidates.push({i,j,quality,points:round(RANK[cat][j]*multiplier(Math.abs(i-j)))});}
+function score(pred,actual){let total=0,category={},details={};for(const cat of Object.keys(CATS)){let pts=0;const candidates=[];for(let i=0;i<pred[cat].length;i++)if(pred[cat][i])for(let j=0;j<actual[cat].length;j++)if(actual[cat][j]){const quality=matchQuality(pred[cat][i],actual[cat][j],cat);if(quality)candidates.push({i,j,quality,points:RANK[cat][j]*multiplier(Math.abs(i-j))});}
 // Only award automatically when the match is unambiguous on both sides.
 const byPred=new Map(),byActual=new Map();for(const c of candidates){if(!byPred.has(c.i))byPred.set(c.i,[]);byPred.get(c.i).push(c);if(!byActual.has(c.j))byActual.set(c.j,[]);byActual.get(c.j).push(c);}
-const used=new Set();details[cat]=pred[cat].map((name,i)=>{const choices=(byPred.get(i)||[]).sort((a,b)=>b.quality-a.quality||b.points-a.points);let chosen=choices.find(c=>!used.has(c.j)&&byActual.get(c.j).filter(x=>x.quality>=c.quality).length===1&&choices.filter(x=>x.quality>=c.quality).length===1);let ambiguous=choices.length>0&&!chosen;if(chosen){used.add(chosen.j);pts+=chosen.points;}return {prediction:name,predictedRank:i+1,actualRank:chosen?chosen.j+1:null,points:chosen?chosen.points:0,needsReview:ambiguous};});category[cat]=round(pts);total+=pts;}return {total:round(total),category,details};}
+const used=new Set();details[cat]=pred[cat].map((name,i)=>{const choices=(byPred.get(i)||[]).sort((a,b)=>b.quality-a.quality||b.points-a.points);let chosen=choices.find(c=>!used.has(c.j)&&byActual.get(c.j).filter(x=>x.quality>=c.quality).length===1&&choices.filter(x=>x.quality>=c.quality).length===1);let ambiguous=choices.length>0&&!chosen;if(chosen){used.add(chosen.j);pts+=chosen.points;}return {prediction:name,predictedRank:i+1,actualRank:chosen?chosen.j+1:null,points:chosen?round(chosen.points):0,needsReview:ambiguous};});category[cat]=round(pts);total+=pts;}return {total:round(total),category,details};}
 
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 export default {async fetch(request,env){const url=new URL(request.url);if(url.pathname==='/'||url.pathname==='/index.html')return new Response(html,{headers:{'content-type':'text/html; charset=utf-8'}});if(!url.pathname.startsWith('/api/'))return new Response('Not found',{status:404});try{
