@@ -12,7 +12,9 @@ const RANK=Object.fromEntries(Object.entries(CATS).map(([cat,count])=>{
 const multiplier=d=>d===0?1:d===1?.8:d===2?.6:d===3?.45:d===4?.3:d<=6?.2:d<=9?.1:.05;
 const norm=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/[\u2010-\u2015]/g,'-').replace(/[^\p{L}\p{N}]+/gu,' ').trim().replace(/\s+/g,' ');
 const round=n=>Math.round((n+Number.EPSILON)*10)/10;
-function cleanLists(raw){let out={};for(const [cat,len] of Object.entries(CATS)){if(!Array.isArray(raw?.[cat])||raw[cat].length>len)throw Error(`Invalid ${cat} list`);out[cat]=Array.from({length:len},(_,i)=>String(raw[cat][i]||'').trim().slice(0,160));let nonempty=out[cat].filter(Boolean).map(norm);if(new Set(nonempty).size!==nonempty.length)throw Error(`Duplicate ${cat} entries`);}return out;}
+function hiddenFlags(lists,cat){return Array.from({length:CATS[cat]},(_,i)=>lists?._hidden?.[cat]?.[i]===true);}
+function cleanLists(raw){let out={_hidden:{}};for(const [cat,len] of Object.entries(CATS)){if(!Array.isArray(raw?.[cat])||raw[cat].length>len)throw Error(`Invalid ${cat} list`);out[cat]=Array.from({length:len},(_,i)=>String(raw[cat][i]||'').trim().slice(0,160));out._hidden[cat]=hiddenFlags(raw,cat);let nonempty=out[cat].filter(Boolean).map(norm);if(new Set(nonempty).size!==nonempty.length)throw Error(`Duplicate ${cat} entries`);}return out;}
+function publicLists(lists){const result={_hidden:{}};for(const cat of Object.keys(CATS)){const hidden=hiddenFlags(lists,cat);result._hidden[cat]=hidden;result[cat]=Array.from({length:CATS[cat]},(_,i)=>hidden[i]?'':lists?.[cat]?.[i]||'');}return result;}
 // Match titles with or without artist credits, while avoiding ambiguous fuzzy matches.
 const title=s=>norm(String(s||'').split(/\s+[—–-]\s+|\s+by\s+/i)[0]);
 function editDistance(a,b){const prev=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){let diag=prev[0];prev[0]=i;for(let j=1;j<=b.length;j++){const old=prev[j];prev[j]=Math.min(prev[j]+1,prev[j-1]+1,diag+(a[i-1]===b[j-1]?0:1));diag=old;}}return prev[b.length];}
@@ -29,7 +31,7 @@ const game=await env.DB.prepare('SELECT phase FROM game WHERE id=1').first();if(
 const method=request.method,route=url.pathname;
 if(route==='/api/state'&&method==='GET'){
 const rows=(await env.DB.prepare('SELECT id,name,predictions,actual FROM players ORDER BY name COLLATE NOCASE').all()).results;
-const players=rows.map(p=>{let predictions=JSON.parse(p.predictions),actual=JSON.parse(p.actual);let hasResults=Object.values(actual).some(a=>a.some(Boolean));return {id:p.id,name:p.name,predictions,actual:game.phase!=='revealed'||!hasResults?null:actual,hasResults,score:game.phase!=='revealed'||!hasResults?null:score(predictions,actual),filled:Object.fromEntries(Object.keys(CATS).map(k=>[k,predictions[k].filter(Boolean).length]))};});return json({phase:game.phase,players});}
+const players=rows.map(p=>{let predictions=JSON.parse(p.predictions),actual=JSON.parse(p.actual);let hasResults=Object.values(actual).some(a=>a.some(Boolean));const publicScore=game.phase!=='revealed'||!hasResults?null:score(predictions,actual);if(publicScore)for(const cat of Object.keys(CATS))for(const detail of publicScore.details[cat]){if(hiddenFlags(predictions,cat)[detail.predictedRank-1])detail.prediction='';}return {id:p.id,name:p.name,predictions:publicLists(predictions),actual:game.phase!=='revealed'||!hasResults?null:publicLists(actual),hasResults,score:publicScore,filled:Object.fromEntries(Object.keys(CATS).map(k=>[k,predictions[k].filter(Boolean).length]))};});return json({phase:game.phase,players});}
 if(route==='/api/player'&&method==='POST'){
 if(game.phase!=='predictions')return json({error:'New players cannot join after predictions lock'},403);
 const body=await request.json(),name=String(body.name||'').trim().replace(/\s+/g,' ').slice(0,60);if(name.length<2)return json({error:'Enter a name with at least 2 characters'},400);
